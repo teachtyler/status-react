@@ -2,11 +2,13 @@
   (:require status-im.bots.events
             status-im.chat.handlers
             status-im.commands.handlers.jail
-            status-im.commands.handlers.loading
+            status-im.commands.events.loading
             status-im.commands.handlers.debug
             status-im.network.handlers
             status-im.protocol.handlers
             status-im.ui.screens.accounts.events
+            status-im.ui.screens.accounts.login.events
+            status-im.ui.screens.accounts.recover.events
             status-im.ui.screens.contacts.events
             status-im.ui.screens.discover.events
             status-im.ui.screens.group.chat-settings.events
@@ -107,12 +109,25 @@
                      #(dispatch (success-event-creator %))
                      #(dispatch (failure-event-creator %)))))
 
-(reg-fx
-  :http-get
-  (fn [{:keys [url success-event-creator failure-event-creator]}]
+(defn- http-get [{:keys [url response-validator success-event-creator failure-event-creator]}]
+  (if response-validator
+    (utils/http-get url
+                    response-validator
+                    #(dispatch (success-event-creator %))
+                    #(dispatch (failure-event-creator %)))
     (utils/http-get url
                     #(dispatch (success-event-creator %))
                     #(dispatch (failure-event-creator %)))))
+
+(reg-fx
+  :http-get
+  http-get)
+
+(reg-fx
+  :http-get-n
+  (fn [calls]
+    (doseq [call calls]
+      (http-get call))))
 
 (reg-fx
   ::init-store
@@ -228,9 +243,9 @@
   :initialize-account-db
   (fn [{:keys [accounts/accounts networks/networks network view-id navigation-stack
                status-module-initialized? status-node-started?]
-        :or [network (get app-db :network)]
-        :as db} [_ address]]
-    (-> app-db
+        :or [network (get db :network)]
+        :as db} [_ address]] 
+    (-> db
         (assoc :current-chat-id console-chat-id
                :accounts/current-account-id address
                ;; TODO (yenda) bad, this is derived data and shouldn't be stored in the db
@@ -248,23 +263,25 @@
 
 (register-handler-fx
   :initialize-account
-  (fn [_ [_ address]]
-    {:dispatch-n [[:initialize-account-db address]
-                  [:load-processed-messages]
-                  [:initialize-protocol address]
-                  [:initialize-sync-listener]
-                  [:initialize-chats]
-                  [:load-contacts]
-                  [:load-contact-groups]
-                  [:init-chat]
-                  [:init-discoveries]
-                  [:initialize-debugging {:address address}]
-                  [:send-account-update-if-needed]
-                  [:start-requesting-discoveries]
-                  [:remove-old-discoveries!]
-                  [:update-wallet]
-                  [:update-transactions]
-                  [:get-fcm-token]]}))
+  (fn [_ [_ address events-after]]
+    {:dispatch-n (cond-> [[:initialize-account-db address]
+                          [:load-processed-messages]
+                          [:initialize-protocol address]
+                          [:initialize-sync-listener]
+                          [:initialize-chats]
+                          [:load-contacts]
+                          [:load-contact-groups] 
+                          [:init-chat]
+                          [:init-discoveries]
+                          [:initialize-debugging {:address address}]
+                          [:send-account-update-if-needed]
+                          [:start-requesting-discoveries]
+                          [:remove-old-discoveries!]
+                          [:update-wallet]
+                          [:update-transactions]
+                          [:get-fcm-token]]
+                   (seq events-after)
+                   (into events-after))}))
 
 (register-handler-fx
   :check-console-chat
@@ -277,10 +294,9 @@
                    :view-id view
                    :navigation-stack (list view))}
        (when (or (empty? accounts) open-console?)
-         {:dispatch-n (concat [[:init-console-chat]
-                               [:load-commands!]]
+         {:dispatch-n (concat [[:init-console-chat]]
                               (when open-console?
-                                [[:navigate-to :chat console-chat-id]]))})))))
+                                [[:navigate-to-chat console-chat-id]]))})))))
 
 (register-handler-fx
   :initialize-crypt
@@ -308,6 +324,15 @@
   (fn [_ _]
     {::get-fcm-token-fx nil}))
 
+;; Because we send command to jail in params and command `:ref` is a lookup vector with
+;; keyword in it (for example `["transactor" :command 51 "send"]`), we lose that keyword
+;; information in the process of converting to/from JSON, and we need to restore it
+(defn- restore-command-ref-keyword
+  [orig-params]
+  (if [(get-in orig-params [:command :command :ref])]
+    (update-in orig-params [:command :command :ref 1] keyword)
+    orig-params))
+
 (defn handle-jail-signal [{:keys [chat_id data]}]
   (let [{:keys [event data]} (types/json->clj data)]
     (case event
@@ -319,7 +344,8 @@
                                                          :message data}])
       "handler-result" (let [orig-params (:origParams data)]
                          ;; TODO(janherich): figure out and fix chat_id from event
-                         (dispatch [:command-handler! (:chat-id orig-params) orig-params
+                         (dispatch [:command-handler! (:chat-id orig-params)
+                                    (restore-command-ref-keyword orig-params)
                                     {:result {:returned (dissoc data :origParams)}}]))
       (log/debug "Unknown jail signal " event))))
 
