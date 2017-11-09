@@ -183,23 +183,21 @@
    :background-color background-color})
 
 (def all-dapps-flat-list
-  {:justify-content  :center
-   :flex-direction   :row
+  {:flex-direction   :column
    :flex-wrap        :wrap
+   :justify-content  :center
+   :align-items      :center
    :margin-top       8
    :background-color styles/color-white})
 
 (def all-dapps-flat-list-item
-  {:margin          10
-   :width           100
+  {
+   :margin          10
+   :width           90
    :height          140
    :justify-content :center
-   :align-items     :center})
-
-(def dapps-list-item-second-row
-  {:flex    1
-   :padding 4
-   :margin  4})
+   :align-items     :center
+  })
 
 (def dapps-list-item-name-container
   {:background-color styles/color-white
