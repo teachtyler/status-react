@@ -8,14 +8,15 @@
     [status-im.ui.components.toolbar.view :as toolbar]
     [status-im.ui.components.status-bar :as status-bar]
     [status-im.ui.screens.wallet.styles :as wallet.styles]
+    [status-im.ui.components.common.common :as common]
     [status-im.ui.components.icons.vector-icons :as vi]
     [status-im.ui.screens.wallet.components.views :as components]
     [status-im.ui.screens.wallet.request.styles :as styles]
     [status-im.ui.components.styles :as components.styles]
     [status-im.i18n :as i18n]
     [status-im.utils.platform :as platform]
-    [status-im.utils.eip.eip67 :as eip67]
-    [status-im.ui.components.common.common :as common]))
+    [status-im.utils.eip.eip681 :as eip681]
+    [status-im.utils.money :as money]))
 
 (defn toolbar-view []
   [toolbar/toolbar {:style wallet.styles/toolbar :hide-border? true}
@@ -30,9 +31,10 @@
                        :params  {:hide-actions? true}}]))
 
 (views/defview qr-code [amount]
-  (views/letsubs [account [:get-current-account]]
+  (views/letsubs [account [:get-current-account]
+                  chain-id [:get-network-id]]
     [components.qr-code/qr-code
-     {:value   (eip67/generate-uri (:address account) (when amount {:value amount}))
+     {:value   (eip681/generate-uri (:address account) (merge {:chain-id chain-id} (when amount {:value (money/to-wei amount)})))
       :size    256}]))
 
 (views/defview request-transaction []
